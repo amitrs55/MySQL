@@ -1,0 +1,202 @@
+/*P1*/
+
+DELIMITER //
+
+CREATE FUNCTION findStoreByProduct(product VARCHAR(255))
+RETURNS INT DETERMINISTIC
+
+BEGIN
+
+DECLARE storeId INT;
+
+select stocks.store_id 
+from stocks
+inner join products using (product_id)
+where products.product_name = product
+order by stocks.quantity desc
+Limit 1
+into storeId;
+RETURN(storeId);
+END //
+
+DELIMITER ;
+
+
+/*P2*/
+
+Delimiter $$
+
+CREATE PROCEDURE placeOrder(
+  IN CustomerId INT,
+  IN ProductId INT,
+  IN Qty INT,
+  OUT OrderId INT
+)
+
+BEGIN
+
+DECLARE nextOrderId INT;
+DECLARE StaffId INT;
+DECLARE StoreId INT;
+
+select max(order_id)+1 from orders into @nextOrderId;
+Select CustomerId into @customerId;
+
+select stocks.store_id 
+from stocks
+inner join products using (product_id)
+where products.product_id = ProductId
+order by stocks.quantity desc
+Limit 1
+into @StoreId;
+
+Select staff_id from orders where store_id = @StoreId 
+limit 1
+into @StaffId;
+
+insert into orders values (@nextOrderId, @CustomerId, 1, curdate(), adddate(curdate(), interval 7 day), null, @StoreId, @StaffId);
+
+Select ProductId into @productID;
+Select Qty into @Qty;
+
+Select list_price from products
+where product_id = ProductId
+into @listPrice;
+
+insert into order_items values (@nextOrderId, 1, @productID, @Qty, @listPrice, 0);
+
+END $$
+
+Delimiter ;
+
+
+/*P3*/
+
+DROP PROCEDURE IF EXISTS bike_stores.placeOrder2;
+
+Delimiter $$
+
+CREATE PROCEDURE placeOrder2(
+  IN CustomerId INT,
+  IN ProductId INT,
+  IN Qty INT,
+  IN StoreID INT,
+  OUT ORDERID INT
+)
+
+BEGIN
+
+DECLARE nextOrderId INT;
+DECLARE StaffId INT;
+DECLARE ListPrice DECIMAL (10,2);
+
+
+START TRANSACTION;
+
+select max(order_id)+1 into nextOrderId from orders;
+
+Select staff_id into StaffId from orders where store_id = StoreID limit 1;
+
+insert into orders values (nextOrderId, CustomerId, 1, curdate(), adddate(curdate(), interval 7 day), null, StoreID, StaffId);
+
+Select list_price into ListPrice from products where product_id = ProductId;
+
+insert into order_items values (nextOrderId, 1, ProductID, Qty, ListPrice, 0);
+
+select quantity into @Stk_Qty from stocks where stocks.store_id = StoreID and stocks.product_id =  ProductId;
+
+If @Stk_Qty >= Qty THEN
+  SET ORDERID=nextOrderId;
+	COMMIT;
+ELSE 
+  SET ORDERID = -1;
+	ROLLBACK;
+END IF;
+
+END $$
+
+Delimiter ;
+
+
+/*P4*/
+
+DROP PROCEDURE IF EXISTS bike_stores.placeOrder3;
+
+Delimiter $$
+
+CREATE PROCEDURE placeOrder3(
+  IN CustomerId INT,
+  IN ProductId INT,
+  IN Qty INT,
+  IN StoreID INT,
+  OUT ORDERID INT
+)
+
+BEGIN
+
+DECLARE nextOrderId INT;
+DECLARE StaffId INT;
+DECLARE ListPrice DECIMAL (10,2);
+DECLARE EXIT HANDLER FOR SQLEXCEPTION
+
+BEGIN
+
+ROLLBACK;
+
+Select 'An error has occured and operation is rolled back!'
+Set ORDERID = -1;
+
+END;
+
+START TRANSACTION;
+
+select max(order_id)+1 into nextOrderId from orders;
+
+Select staff_id into StaffId from orders where store_id = StoreID limit 1;
+
+insert into orders values (nextOrderId, CustomerId, 1, curdate(), adddate(curdate(), interval 7 day), null, StoreID, StaffId);
+
+Select list_price into ListPrice from products where product_id = ProductId;
+
+insert into order_items values (nextOrderId, 1, ProductID, Qty, ListPrice, 0);
+
+select quantity into @Stk_Qty from stocks where stocks.store_id = StoreID and stocks.product_id =  ProductId;
+
+If @Stk_Qty >= Qty THEN
+  SET ORDERID=nextOrderId;
+	COMMIT;
+ELSE 
+  SET ORDERID = -1;
+	ROLLBACK;
+END IF;
+
+END $$
+
+Delimiter;
+
+
+/*P5*/
+
+DELIMITER //
+CREATE TRIGGER LatestOrder
+AFTER INSERT
+ON orders for EACH ROW
+
+BEGIN
+
+DECLARE TodayCount INT;
+
+Select count (*) from trigger_data WHERE date = CURDATE() into TodayCount;
+
+If TodayCount > 0 THEN
+  UPDATE trigger_data SET orderID = NEW.order_id;
+ELSE
+  INSERT INTO trigger_data VALUES (CURDATE(), NEW.order_id);
+END IF;
+
+END //
+
+DELIMITER ;
+
+
+
